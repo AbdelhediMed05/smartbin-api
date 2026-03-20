@@ -8,7 +8,6 @@ from PIL import Image
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from supabase import create_client
-from huggingface_hub import HfApi
 
 from auth import get_current_user
 from config import get_settings
@@ -21,7 +20,6 @@ limiter = Limiter(key_func=get_remote_address)
 logger = logging.getLogger(__name__)
 
 supabase_svc = create_client(settings.supabase_url, settings.supabase_service_key)
-hf_api = HfApi(token=settings.hf_token)
 
 MODEL_VERSION = "v5"
 MAX_BYTES = settings.max_image_size_mb * 1024 * 1024
@@ -75,22 +73,41 @@ async def predict(
     ]
 
     if detections:
-        # ── 6. Save image to HuggingFace Dataset ──────────────────────────────
-        safe_name = sanitize_filename("jpg")
-        image_path = f"images/{safe_name}"
+        # ── 6. Cleanup previous pending images from this user (no feedback given)
         try:
-            buf = io.BytesIO()
-            pil_img.save(buf, format="JPEG", quality=85)
-            buf.seek(0)
-            hf_api.upload_file(
-                path_or_fileobj=buf,
-                path_in_repo=image_path,
-                repo_id=settings.hf_dataset_repo,
-                repo_type="dataset",
+            stale = supabase_svc.table("predictions") \
+                .select("pending_path") \
+                .eq("user_id", user_id) \
+                .not_.is_("pending_path", "null") \
+                .execute()
+            stale_paths = [r["pending_path"] for r in stale.data if r.get("pending_path")]
+            if stale_paths:
+                supabase_svc.storage.from_("smartbin-images").remove(stale_paths)
+                supabase_svc.table("predictions") \
+                    .update({"pending_path": None}) \
+                    .eq("user_id", user_id) \
+                    .not_.is_("pending_path", "null") \
+                    .execute()
+                logger.info(f"Cleaned {len(stale_paths)} stale pending image(s) for user {user_id}")
+        except Exception as e:
+            logger.warning(f"Stale pending cleanup failed: {e}")
+
+        # ── 7. Store image in Supabase Storage (pending feedback) ─────────────
+        safe_name  = sanitize_filename("jpg")
+        image_path = f"images/{safe_name}"
+        pending_path = f"pending/{safe_name}"
+        buf = io.BytesIO()
+        pil_img.save(buf, format="JPEG", quality=85)
+        img_bytes = buf.getvalue()
+        try:
+            supabase_svc.storage.from_("smartbin-images").upload(
+                path=pending_path,
+                file=img_bytes,
+                file_options={"content-type": "image/jpeg"},
             )
         except Exception as e:
-            logger.warning(f"HF upload failed: {e}")
-            image_path = None
+            logger.warning(f"Supabase storage upload failed: {e}")
+            pending_path = None
 
         # ── 7. Save prediction to Supabase ────────────────────────────────────
         primary = detections[0]
@@ -99,9 +116,12 @@ async def predict(
                 "id":               prediction_id,
                 "user_id":          user_id,
                 "image_path":       image_path,
+                "pending_path":     pending_path,
                 "predicted_class":  primary.class_name,
                 "confidence":       round(primary.confidence, 4),
                 "all_detections":   detections_payload,
+                "image_width":      orig_w,
+                "image_height":     orig_h,
                 "model_version":    MODEL_VERSION,
                 "created_at":       datetime.now(timezone.utc).isoformat(),
             }).execute()
