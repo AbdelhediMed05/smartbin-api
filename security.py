@@ -1,0 +1,60 @@
+import hashlib
+import io
+import uuid
+from datetime import datetime
+from typing import Tuple
+
+import magic
+from PIL import Image
+
+
+ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_DIMENSION = 4096
+
+
+def validate_image(data: bytes, filename: str) -> Tuple[bool, str]:
+    """Full image security validation pipeline."""
+    # 1. MIME type via magic bytes
+    mime = magic.from_buffer(data, mime=True)
+    if mime not in ALLOWED_MIME_TYPES:
+        return False, f"Invalid file type: {mime}. Only JPEG, PNG, WebP allowed."
+
+    # 2. PIL verify (rejects malformed/polyglot files)
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.verify()
+    except Exception:
+        return False, "File is corrupt or not a valid image."
+
+    # 3. Re-open to check dimensions (verify() closes the image)
+    try:
+        img = Image.open(io.BytesIO(data))
+        w, h = img.size
+        if w > MAX_DIMENSION or h > MAX_DIMENSION:
+            return False, f"Image too large: {w}x{h}. Maximum {MAX_DIMENSION}x{MAX_DIMENSION}."
+    except Exception:
+        return False, "Could not read image dimensions."
+
+    return True, "ok"
+
+
+def hash_ip(ip: str) -> str:
+    """SHA256 hash of IP, truncated to 16 chars. Never store raw IPs."""
+    return hashlib.sha256(ip.encode()).hexdigest()[:16]
+
+
+def sanitize_filename(ext: str = "jpg") -> str:
+    """Generate a safe filename: {timestamp}_{uuid8}.ext — no PII."""
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    uid = str(uuid.uuid4()).replace("-", "")[:8]
+    return f"{ts}_{uid}.{ext}"
+
+
+def strip_exif(pil_image: Image.Image) -> Image.Image:
+    """Remove all EXIF metadata by re-encoding through a clean buffer."""
+    clean = Image.new(pil_image.mode, pil_image.size)
+    clean.putdata(list(pil_image.getdata()))
+    # Copy palette if needed
+    if pil_image.mode == "P":
+        clean.putpalette(pil_image.getpalette())
+    return clean

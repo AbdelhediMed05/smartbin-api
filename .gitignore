@@ -1,0 +1,49 @@
+# ── Environment & Secrets (NEVER commit these) ────────────────────────────
+.env
+.env.local
+.env.*.local
+*.env
+
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# ── Virtual environments ───────────────────────────────────────────────────
+venv/
+env/
+.venv/
+.env/
+ENV/
+env.bak/
+venv.bak/
+
+# ── ONNX model (too large for Git — commit manually or load from HF Hub) ──
+# ⚠️  Comment this line out if you want to include the model in the repo
+# best_combined.onnx
+
+# ── Pytest / testing ───────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.xml
+
+# ── IDE ────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Logs ───────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Build / dist ───────────────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
