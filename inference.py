@@ -33,7 +33,7 @@ class Detection:
 
 def letterbox(
     image: Image.Image,
-    target_size: int = 640,
+    target_size: int = 480,
 ) -> Tuple[np.ndarray, dict]:
     """Resize with padding to maintain aspect ratio."""
     orig_w, orig_h = image.size
