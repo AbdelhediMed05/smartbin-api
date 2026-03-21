@@ -1,6 +1,6 @@
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from supabase import create_client
 
 from config import get_settings
@@ -15,7 +15,11 @@ _start_time = time.time()
 
 
 @router.api_route("/health", methods=["GET", "HEAD"])
-async def health():
+async def health(request: Request):
+    # HEAD requests (UptimeRobot pings) — lightweight response, no DB query
+    if request.method == "HEAD":
+        return {}
+
     # DB check
     db_status = "ok"
     try:
