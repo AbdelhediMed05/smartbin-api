@@ -14,7 +14,7 @@ supabase_svc = create_client(settings.supabase_url, settings.supabase_service_ke
 _start_time = time.time()
 
 
-@router.get("/health")
+@router.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     # DB check
     db_status = "ok"
