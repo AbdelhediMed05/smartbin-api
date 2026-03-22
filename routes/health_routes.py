@@ -1,7 +1,7 @@
 import time
 
 from fastapi import APIRouter, Request
-from supabase import create_client
+from db import supabase_svc
 
 from config import get_settings
 from inference import get_model
@@ -9,7 +9,6 @@ from inference import get_model
 settings = get_settings()
 router = APIRouter(tags=["health"])
 
-supabase_svc = create_client(settings.supabase_url, settings.supabase_service_key)
 
 _start_time = time.time()
 

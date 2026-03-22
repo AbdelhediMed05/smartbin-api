@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from supabase import create_client
+from db import supabase_svc, supabase_anon
 
 from config import get_settings
 
@@ -13,8 +13,6 @@ settings = get_settings()
 router = APIRouter(prefix="/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
 
-supabase_anon = create_client(settings.supabase_url, settings.supabase_anon_key)
-supabase_svc  = create_client(settings.supabase_url, settings.supabase_service_key)
 
 # ── Validation helpers ────────────────────────────────────────────────────────
 
@@ -140,25 +138,24 @@ async def login(request: Request, body: LoginRequest):
 def _handle_failed_login(email: str):
     """Increment failed_logins and lock account after 5 failures."""
     try:
-        # Find user by email via admin
-        users = supabase_svc.auth.admin.list_users()
-        user = next((u for u in users if u.email == email), None)
-        if not user:
+        from datetime import timedelta
+        # Use admin getUserByEmail instead of listing all users
+        user = supabase_svc.auth.admin.get_user_by_email(email)
+        if not user or not user.user:
             return
         profile_res = supabase_svc.table("profiles").select(
             "id,failed_logins"
-        ).eq("id", user.id).single().execute()
+        ).eq("id", user.user.id).single().execute()
         profile = profile_res.data
         if not profile:
             return
         new_count = (profile.get("failed_logins") or 0) + 1
         update = {"failed_logins": new_count}
         if new_count >= 5:
-            from datetime import timedelta
             update["locked_until"] = (
                 datetime.now(timezone.utc) + timedelta(minutes=15)
             ).isoformat()
-        supabase_svc.table("profiles").update(update).eq("id", user.id).execute()
+        supabase_svc.table("profiles").update(update).eq("id", user.user.id).execute()
     except Exception:
         pass  # Don't expose lockout errors
 

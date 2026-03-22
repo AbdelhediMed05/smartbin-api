@@ -17,6 +17,7 @@ from routes.stats_routes import router as stats_router
 from routes.health_routes import router as health_router
 
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)  # silence httpx request logs
 logger = logging.getLogger(__name__)
 settings = get_settings()
 

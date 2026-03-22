@@ -3,7 +3,7 @@ from functools import lru_cache
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from supabase import create_client
+from db import supabase_svc
 
 from auth import get_current_user
 from config import get_settings
@@ -11,7 +11,6 @@ from config import get_settings
 settings = get_settings()
 router = APIRouter(prefix="/stats", tags=["stats"])
 
-supabase_svc = create_client(settings.supabase_url, settings.supabase_service_key)
 
 # Simple in-memory leaderboard cache
 _leaderboard_cache: Optional[dict] = None

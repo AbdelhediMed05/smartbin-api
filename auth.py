@@ -1,11 +1,16 @@
+import json
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
+
 from config import get_settings
-import json
 
 settings = get_settings()
 bearer_scheme = HTTPBearer()
+
+# Parse once at startup — not on every request
+_JWT_PUBLIC_KEY = json.loads(settings.jwt_secret)
 
 
 async def get_current_user(
@@ -24,9 +29,9 @@ async def get_current_user(
     try:
         payload = jwt.decode(
             token,
-            json.loads(settings.jwt_secret),
+            _JWT_PUBLIC_KEY,
             algorithms=["ES256"],
-            options={"verify_aud": False},  # Supabase tokens have audience set
+            options={"verify_aud": False},
         )
         user_id: str = payload.get("sub")
         if user_id is None:

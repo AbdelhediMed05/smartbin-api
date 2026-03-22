@@ -1,7 +1,7 @@
 import hashlib
 import io
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Tuple
 
 import magic
@@ -45,16 +45,17 @@ def hash_ip(ip: str) -> str:
 
 def sanitize_filename(ext: str = "jpg") -> str:
     """Generate a safe filename: {timestamp}_{uuid8}.ext — no PII."""
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     uid = str(uuid.uuid4()).replace("-", "")[:8]
     return f"{ts}_{uid}.{ext}"
 
 
 def strip_exif(pil_image: Image.Image) -> Image.Image:
-    """Remove all EXIF metadata by re-encoding through a clean buffer."""
-    clean = Image.new(pil_image.mode, pil_image.size)
-    clean.putdata(list(pil_image.getdata()))
-    # Copy palette if needed
-    if pil_image.mode == "P":
-        clean.putpalette(pil_image.getpalette())
-    return clean
+    """
+    Remove EXIF by re-saving through a JPEG buffer — fast and memory efficient.
+    Avoids putdata() which copies every pixel into a Python list.
+    """
+    buf = io.BytesIO()
+    pil_image.save(buf, format="JPEG", quality=95)
+    buf.seek(0)
+    return Image.open(buf).convert("RGB")

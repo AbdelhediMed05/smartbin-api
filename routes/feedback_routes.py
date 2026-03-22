@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from huggingface_hub import HfApi
 from pydantic import BaseModel
 from slowapi import Limiter
@@ -22,6 +22,47 @@ supabase_svc = create_client(settings.supabase_url, settings.supabase_service_ke
 hf_api = HfApi(token=settings.hf_token)
 
 VALID_CLASSES = {"Plastic", "Glass", "Metal", "Paper", "Unknown"}
+
+
+def _upload_to_hf(
+    image_path: str,
+    pending_path: str,
+    bbox: dict,
+    correct_class: str,
+    img_w: int,
+    img_h: int,
+):
+    """Background task — runs after response is sent to user."""
+    try:
+        img_bytes = supabase_svc.storage.from_("smartbin-images").download(pending_path)
+        hf_api.upload_file(
+            path_or_fileobj=io.BytesIO(img_bytes),
+            path_in_repo=image_path,
+            repo_id=settings.hf_dataset_repo,
+            repo_type="dataset",
+        )
+        try:
+            supabase_svc.storage.from_("smartbin-images").remove([pending_path])
+        except Exception:
+            pass
+
+        if bbox:
+            CLASS_IDS = {"Plastic": 0, "Glass": 1, "Metal": 2, "Paper": 3}
+            class_id  = CLASS_IDS.get(correct_class, 0)
+            cx = ((bbox["x1"] + bbox["x2"]) / 2) / img_w
+            cy = ((bbox["y1"] + bbox["y2"]) / 2) / img_h
+            bw = (bbox["x2"] - bbox["x1"]) / img_w
+            bh = (bbox["y2"] - bbox["y1"]) / img_h
+            yolo_line  = f"{class_id} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}\n"
+            label_path = image_path.replace("images/", "labels/").replace(".jpg", ".txt")
+            hf_api.upload_file(
+                path_or_fileobj=yolo_line.encode(),
+                path_in_repo=label_path,
+                repo_id=settings.hf_dataset_repo,
+                repo_type="dataset",
+            )
+    except Exception as e:
+        logger.warning(f"HF upload failed: {e}")
 
 
 class BBox(BaseModel):
@@ -43,6 +84,7 @@ async def submit_feedback(
     request: Request,
     prediction_id: str,
     body: FeedbackRequest,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
 ):
     user_id = current_user["user_id"]
@@ -103,49 +145,20 @@ async def submit_feedback(
     except Exception:
         pass  # Points failure shouldn't block response
 
-    # Upload image + label to HuggingFace on feedback confirmation
-    if image_path and img_w and img_h:
-        try:
-            # Fetch image from Supabase Storage and upload to HF
-            if pending_path:
-                img_bytes = supabase_svc.storage.from_("smartbin-images").download(pending_path)
-                hf_api.upload_file(
-                    path_or_fileobj=io.BytesIO(img_bytes),
-                    path_in_repo=image_path,
-                    repo_id=settings.hf_dataset_repo,
-                    repo_type="dataset",
-                )
-                # Delete from Supabase Storage after upload
-                try:
-                    supabase_svc.storage.from_("smartbin-images").remove([pending_path])
-                except Exception:
-                    pass
-            # bbox: use user-drawn box if provided, else take from model detections
-            if body.bbox:
-                bbox = {"x1": body.bbox.x1, "y1": body.bbox.y1,
-                        "x2": body.bbox.x2, "y2": body.bbox.y2}
-            elif all_detections:
-                bbox = all_detections[0].get("bbox")
-            else:
-                bbox = None
+    # Schedule HF upload as background task — returns immediately to user
+    if image_path and img_w and img_h and pending_path:
+        if body.bbox:
+            bbox = {"x1": body.bbox.x1, "y1": body.bbox.y1,
+                    "x2": body.bbox.x2, "y2": body.bbox.y2}
+        elif all_detections:
+            bbox = all_detections[0].get("bbox")
+        else:
+            bbox = None
 
-            if bbox:
-                correct_class = body.correct_class if not body.was_correct else predicted_class
-                CLASS_IDS = {"Plastic": 0, "Glass": 1, "Metal": 2, "Paper": 3}
-                class_id  = CLASS_IDS.get(correct_class, 0)
-                cx = ((bbox["x1"] + bbox["x2"]) / 2) / img_w
-                cy = ((bbox["y1"] + bbox["y2"]) / 2) / img_h
-                bw = (bbox["x2"] - bbox["x1"]) / img_w
-                bh = (bbox["y2"] - bbox["y1"]) / img_h
-                yolo_line  = f"{class_id} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}\n"
-                label_path = image_path.replace("images/", "labels/").replace(".jpg", ".txt")
-                hf_api.upload_file(
-                    path_or_fileobj=yolo_line.encode(),
-                    path_in_repo=label_path,
-                    repo_id=settings.hf_dataset_repo,
-                    repo_type="dataset",
-                )
-        except Exception as e:
-            logger.warning(f"HF label upload failed: {e}")
+        correct_class = body.correct_class if not body.was_correct else predicted_class
+        background_tasks.add_task(
+            _upload_to_hf,
+            image_path, pending_path, bbox, correct_class, img_w, img_h,
+        )
 
     return {"message": "Feedback saved.", "points_awarded": points_awarded}
