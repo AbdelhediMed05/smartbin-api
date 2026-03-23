@@ -9,12 +9,12 @@ class Settings(BaseSettings):
     jwt_secret: str
     hf_token: str
     hf_dataset_repo: str
-    onnx_model_path: str = "best_combined.onnx"
-    confidence_threshold: float = 0.45
-    iou_threshold: float = 0.60
-    max_image_size_mb: int = 5
-    frontend_url: str = "https://smartbin-app.onrender.com"
-    debug: bool = False
+    onnx_model_path: str 
+    confidence_threshold: float 
+    iou_threshold: float 
+    max_image_size_mb: int
+    frontend_url: str 
+    debug: bool 
     app_version: str = "1.0.0"
 
     class Config:
