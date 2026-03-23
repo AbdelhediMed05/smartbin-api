@@ -17,7 +17,6 @@ from routes.stats_routes import router as stats_router
 from routes.health_routes import router as health_router
 
 logging.basicConfig(level=logging.INFO)
-logging.getLogger("httpx").setLevel(logging.WARNING)  # silence httpx request logs
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
@@ -53,13 +52,13 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
     allow_credentials=True,
 )
 
 # Trusted hosts
-trusted_hosts = ["smartbin-api-96u6.onrender.com", "localhost", "127.0.0.1"]
+trusted_hosts = ["smartbin-api.onrender.com", "localhost", "127.0.0.1"]
 if settings.debug:
     trusted_hosts.append("*")
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
@@ -74,8 +73,7 @@ async def security_headers(request: Request, call_next):
     response.headers["X-XSS-Protection"]          = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Content-Security-Policy"]   = "default-src 'none'; frame-ancestors 'none'"
-    if "server" in response.headers:
-        del response.headers["server"]
+    response.headers.pop("server", None)
     return response
 
 

@@ -4,24 +4,18 @@ from datetime import datetime, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from huggingface_hub import HfApi
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from supabase import create_client
 
 from auth import get_current_user
 from config import get_settings
+from db import supabase_svc, hf_api  # shared clients — no new instances
 
 settings = get_settings()
-router = APIRouter(tags=["feedback"])
-limiter = Limiter(key_func=get_remote_address)
-logger = logging.getLogger(__name__)
-
-supabase_svc = create_client(settings.supabase_url, settings.supabase_service_key)
-hf_api = HfApi(token=settings.hf_token)
-
-VALID_CLASSES = {"Plastic", "Glass", "Metal", "Paper", "Unknown"}
+router   = APIRouter(tags=["feedback"])
+limiter  = Limiter(key_func=get_remote_address)
+logger   = logging.getLogger(__name__)
 
 
 def _upload_to_hf(
@@ -32,21 +26,27 @@ def _upload_to_hf(
     img_w: int,
     img_h: int,
 ):
-    """Background task — runs after response is sent to user."""
+    """
+    Background task — runs after response is sent to user.
+    Downloads image from Supabase Storage, uploads to HuggingFace,
+    deletes from Storage, writes YOLO label file.
+    """
     try:
         img_bytes = supabase_svc.storage.from_("smartbin-images").download(pending_path)
+
         hf_api.upload_file(
             path_or_fileobj=io.BytesIO(img_bytes),
             path_in_repo=image_path,
             repo_id=settings.hf_dataset_repo,
             repo_type="dataset",
         )
+
         try:
             supabase_svc.storage.from_("smartbin-images").remove([pending_path])
         except Exception:
-            pass
+            pass  # Non-critical — nightly cron handles orphans
 
-        if bbox:
+        if bbox and img_w and img_h:
             CLASS_IDS = {"Plastic": 0, "Glass": 1, "Metal": 2, "Paper": 3}
             class_id  = CLASS_IDS.get(correct_class, 0)
             cx = ((bbox["x1"] + bbox["x2"]) / 2) / img_w
@@ -62,7 +62,7 @@ def _upload_to_hf(
                 repo_type="dataset",
             )
     except Exception as e:
-        logger.warning(f"HF upload failed: {e}")
+        logger.warning(f"HF background upload failed: {e}")
 
 
 class BBox(BaseModel):
@@ -75,7 +75,7 @@ class BBox(BaseModel):
 class FeedbackRequest(BaseModel):
     correct_class: Literal["Plastic", "Glass", "Metal", "Paper", "Unknown"]
     was_correct: bool
-    bbox: Optional[BBox] = None  # user-drawn box (only when was_correct=False)
+    bbox: Optional[BBox] = None
 
 
 @router.post("/feedback/{prediction_id}")
@@ -89,11 +89,10 @@ async def submit_feedback(
 ):
     user_id = current_user["user_id"]
 
-    # Verify the prediction belongs to this user (belt + RLS suspenders)
     try:
-        pred_res = supabase_svc.table("predictions").select("id,user_id,image_path,predicted_class,all_detections,image_width,image_height,pending_path").eq(
-            "id", prediction_id
-        ).eq("user_id", user_id).single().execute()
+        pred_res = supabase_svc.table("predictions").select(
+            "id,user_id,image_path,predicted_class,all_detections,image_width,image_height,pending_path"
+        ).eq("id", prediction_id).eq("user_id", user_id).single().execute()
         if not pred_res.data:
             raise HTTPException(404, "Prediction not found.")
     except HTTPException:
@@ -108,7 +107,6 @@ async def submit_feedback(
     img_h           = pred_res.data.get("image_height")
     pending_path    = pred_res.data.get("pending_path")
 
-    # Check for duplicate feedback
     try:
         existing = supabase_svc.table("corrections").select("id").eq(
             "prediction_id", prediction_id
@@ -120,7 +118,6 @@ async def submit_feedback(
     except Exception:
         pass
 
-    # Save correction
     try:
         supabase_svc.table("corrections").insert({
             "prediction_id": prediction_id,
@@ -132,7 +129,6 @@ async def submit_feedback(
     except Exception as e:
         raise HTTPException(500, f"Failed to save feedback: {e}")
 
-    # Award points
     points_awarded = 1 if body.was_correct else 2
     try:
         supabase_svc.table("points").insert({
@@ -143,9 +139,8 @@ async def submit_feedback(
             "created_at":   datetime.now(timezone.utc).isoformat(),
         }).execute()
     except Exception:
-        pass  # Points failure shouldn't block response
+        pass
 
-    # Schedule HF upload as background task — returns immediately to user
     if image_path and img_w and img_h and pending_path:
         if body.bbox:
             bbox = {"x1": body.bbox.x1, "y1": body.bbox.y1,
