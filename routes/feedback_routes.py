@@ -25,11 +25,14 @@ def _upload_to_hf(
     correct_class: str,
     img_w: int,
     img_h: int,
+    prediction_id: str,
+    was_correct: bool,
 ):
     """
     Background task — runs after response is sent to user.
     Downloads image from Supabase Storage, uploads to HuggingFace,
     deletes from Storage, writes YOLO label file.
+    Updates prediction record with confirmed class.
     """
     try:
         img_bytes = supabase_svc.storage.from_("smartbin-images").download(pending_path)
@@ -45,6 +48,14 @@ def _upload_to_hf(
             supabase_svc.storage.from_("smartbin-images").remove([pending_path])
         except Exception:
             pass  # Non-critical — nightly cron handles orphans
+
+        # Clear pending_path after successful HF upload
+        try:
+            supabase_svc.table("predictions").update(
+                {"pending_path": None}
+            ).eq("id", prediction_id).execute()
+        except Exception as e:
+            logger.warning(f"Prediction pending_path clear failed: {e}")
 
         if bbox and img_w and img_h:
             CLASS_IDS = {"Plastic": 0, "Glass": 1, "Metal": 2, "Paper": 3}
@@ -161,6 +172,7 @@ async def submit_feedback(
             background_tasks.add_task(
                 _upload_to_hf,
                 image_path, pending_path, bbox, correct_class, img_w, img_h,
+                prediction_id, body.was_correct,
             )
     # No-detection case: no image in storage but feedback still recorded —
     # this is correct. Points are still awarded. No HF upload needed.
