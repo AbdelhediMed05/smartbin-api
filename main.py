@@ -16,19 +16,9 @@ from routes.feedback_routes import router as feedback_router
 from routes.stats_routes import router as stats_router
 from routes.health_routes import router as health_router
 
-# ── Logging setup ─────────────────────────────────────────────────────────────
-# Show only WARNING+ for noisy third-party libraries
-# Keep INFO for our own app code
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s:%(name)s:%(message)s",
-)
-logging.getLogger("httpx").setLevel(logging.WARNING)       # silences Supabase HTTP logs
-logging.getLogger("httpcore").setLevel(logging.WARNING)    # silences underlying HTTP core
-logging.getLogger("hpack").setLevel(logging.WARNING)       # silences HTTP/2 header logs
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # suppress per-request access logs
-                                                               # (we log errors ourselves)
 
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)  # silence httpx request logs
 logger   = logging.getLogger(__name__)
 settings = get_settings()
 
@@ -71,7 +61,6 @@ app.add_middleware(
 # Trusted hosts — include Render internal IPs and health check ranges
 trusted_hosts = [
     "smartbin-api-96u6.onrender.com",  # your actual Render hostname
-    "smartbin-api.onrender.com",
     "localhost",
     "127.0.0.1",
     "10.*",       # Render internal health check IPs
@@ -80,8 +69,7 @@ trusted_hosts = [
     "52.*",
 ]
 if settings.debug:
-    trusted_hosts = ["*"]
-
+    trusted_hosts.append("*")
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
 
 
