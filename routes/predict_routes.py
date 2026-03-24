@@ -184,17 +184,37 @@ async def predict(
             pass
 
     else:
-        # No detections — save minimal record so user can still correct with a drawn box.
-        # Nullable fields (image_path, predicted_class, confidence) are omitted entirely.
-        # Requires: ALTER TABLE predictions ALTER COLUMN image_path DROP NOT NULL;
-        #           ALTER TABLE predictions ALTER COLUMN predicted_class DROP NOT NULL;
-        #           ALTER TABLE predictions ALTER COLUMN confidence DROP NOT NULL;
+        # No detections — still upload image to Storage so user can draw a correction box
+        safe_name    = sanitize_filename("jpg")
+        image_path   = f"images/{safe_name}"
+        pending_path = f"pending/{safe_name}"
+
+        buf = io.BytesIO()
+        pil_img.save(buf, format="JPEG", quality=75)
+        buf.seek(0)
         del pil_img
         gc.collect()
+
+        try:
+            supabase_svc.storage.from_("smartbin-images").upload(
+                path=pending_path,
+                file=buf.read(),
+                file_options={"content-type": "image/jpeg"},
+            )
+        except Exception as e:
+            logger.warning(f"No-detection storage upload failed: {e}")
+            pending_path = None
+        finally:
+            buf.close()
+            del buf
+            gc.collect()
+
         try:
             supabase_svc.table("predictions").insert({
                 "id":             prediction_id,
                 "user_id":        user_id,
+                "image_path":     image_path,
+                "pending_path":   pending_path,
                 "all_detections": [],
                 "image_width":    orig_w,
                 "image_height":   orig_h,
