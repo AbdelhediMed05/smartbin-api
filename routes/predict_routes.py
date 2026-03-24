@@ -184,22 +184,22 @@ async def predict(
             pass
 
     else:
-        # No detections — still save record so user can correct with a drawn box
+        # No detections — save minimal record so user can still correct with a drawn box.
+        # Nullable fields (image_path, predicted_class, confidence) are omitted entirely.
+        # Requires: ALTER TABLE predictions ALTER COLUMN image_path DROP NOT NULL;
+        #           ALTER TABLE predictions ALTER COLUMN predicted_class DROP NOT NULL;
+        #           ALTER TABLE predictions ALTER COLUMN confidence DROP NOT NULL;
         del pil_img
         gc.collect()
         try:
             supabase_svc.table("predictions").insert({
-                "id":               prediction_id,
-                "user_id":          user_id,
-                "image_path":       None,
-                "pending_path":     None,
-                "predicted_class":  None,
-                "confidence":       None,
-                "all_detections":   [],
-                "image_width":      orig_w,
-                "image_height":     orig_h,
-                "model_version":    MODEL_VERSION,
-                "created_at":       datetime.now(timezone.utc).isoformat(),
+                "id":             prediction_id,
+                "user_id":        user_id,
+                "all_detections": [],
+                "image_width":    orig_w,
+                "image_height":   orig_h,
+                "model_version":  MODEL_VERSION,
+                "created_at":     datetime.now(timezone.utc).isoformat(),
             }).execute()
         except Exception as e:
             logger.warning(f"No-detection record insert failed: {e}")

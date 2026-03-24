@@ -73,7 +73,9 @@ class BBox(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
-    correct_class: Literal["Plastic", "Glass", "Metal", "Paper", "Unknown"]
+    # correct_class is Optional — when was_correct=True and no detection,
+    # it may not be meaningful. Defaults to "Unknown" if omitted.
+    correct_class: Literal["Plastic", "Glass", "Metal", "Paper", "Unknown"] = "Unknown"
     was_correct: bool
     bbox: Optional[BBox] = None
 
@@ -150,10 +152,17 @@ async def submit_feedback(
         else:
             bbox = None
 
-        correct_class = body.correct_class if not body.was_correct else predicted_class
-        background_tasks.add_task(
-            _upload_to_hf,
-            image_path, pending_path, bbox, correct_class, img_w, img_h,
-        )
+        # was_correct=True → use predicted_class; False → use user's correct_class
+        # If no predicted_class (no-detection case), always use body.correct_class
+        correct_class = (predicted_class or body.correct_class) if body.was_correct else body.correct_class
+
+        # Only upload if we have a valid class
+        if correct_class and correct_class != "Unknown":
+            background_tasks.add_task(
+                _upload_to_hf,
+                image_path, pending_path, bbox, correct_class, img_w, img_h,
+            )
+    # No-detection case: no image in storage but feedback still recorded —
+    # this is correct. Points are still awarded. No HF upload needed.
 
     return {"message": "Feedback saved.", "points_awarded": points_awarded}
