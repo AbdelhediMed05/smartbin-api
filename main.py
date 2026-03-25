@@ -59,7 +59,7 @@ app.add_middleware(
 )
 
 # Trusted hosts — include Render internal IPs and health check ranges
-trusted_hosts = ["smartbin-api-96u6.onrender.com", "localhost", "127.0.0.1"]
+trusted_hosts = [settings.trusted_host, "localhost", "127.0.0.1"]
 if settings.debug:
     trusted_hosts.append("*")
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)

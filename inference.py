@@ -8,15 +8,9 @@ import numpy as np
 import onnxruntime as ort
 from PIL import Image
 
-logger = logging.getLogger(__name__)
+from domain.classes import CLASS_COLORS, CLASS_NAMES
 
-CLASS_NAMES = ["Plastic", "Glass", "Metal", "Paper"]
-CLASS_COLORS = {
-    "Plastic": "#1E90FF",   # Blue
-    "Glass":   "#00CED1",   # Cyan
-    "Metal":   "#FF8C00",   # Orange
-    "Paper":   "#22c55e",   # Green
-}
+logger = logging.getLogger(__name__)
 
 
 @dataclass

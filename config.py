@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     iou_threshold: float 
     max_image_size_mb: int
     frontend_url: str 
+    trusted_host: str
     debug: bool 
     app_version: str = "1.0.0"
 
