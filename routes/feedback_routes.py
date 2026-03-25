@@ -1,7 +1,7 @@
 import io
 import logging
 from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -84,11 +84,16 @@ class BBox(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
-    # correct_class is Optional — when was_correct=True and no detection,
-    # it may not be meaningful. Defaults to "Unknown" if omitted.
-    correct_class: Literal["Plastic", "Glass", "Metal", "Paper", "Unknown"] = "Unknown"
+    # Use Optional[str] not Literal — Pydantic v2 rejects null even with a Literal default.
+    # The validator below coerces null/invalid values to "Unknown" safely.
+    correct_class: Optional[str] = "Unknown"
     was_correct: bool
     bbox: Optional[BBox] = None
+
+    def model_post_init(self, __context) -> None:
+        valid = {"Plastic", "Glass", "Metal", "Paper", "Unknown"}
+        if not self.correct_class or self.correct_class not in valid:
+            self.correct_class = "Unknown"
 
 
 @router.post("/feedback/{prediction_id}")
