@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 
+from config import get_settings
 from domain.auth_policy import (
     ACCESS_TOKEN_EXPIRES_IN,
     FAILED_LOGIN_LIMIT,
@@ -12,6 +13,8 @@ from domain.auth_policy import (
     USERNAME_PATTERN,
 )
 from repositories import auth_repository
+
+settings = get_settings()
 
 
 def validate_password(password: str):
@@ -31,9 +34,10 @@ def validate_username(username: str):
 def register(email: str, password: str, username: str) -> dict:
     validate_password(password)
     validate_username(username)
+    email_redirect_to = f"{settings.frontend_url.rstrip('/')}/email-confirmed.html"
 
     try:
-        res = auth_repository.sign_up(email, password, username)
+        res = auth_repository.sign_up(email, password, username, email_redirect_to=email_redirect_to)
         if res.user is None:
             raise HTTPException(400, "Registration failed. Email may already be in use.")
     except Exception as e:

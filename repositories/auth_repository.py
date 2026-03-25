@@ -1,11 +1,15 @@
 from db import supabase_anon, supabase_svc
 
 
-def sign_up(email: str, password: str, username: str):
+def sign_up(email: str, password: str, username: str, email_redirect_to: str | None = None):
+    options = {"data": {"username": username}}
+    if email_redirect_to:
+        options["email_redirect_to"] = email_redirect_to
+
     return supabase_anon.auth.sign_up({
         "email": email,
         "password": password,
-        "options": {"data": {"username": username}},
+        "options": options,
     })
 
 
