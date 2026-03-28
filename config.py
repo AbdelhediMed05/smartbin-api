@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     trusted_host: str
     debug: bool 
     app_version: str = "1.0.0"
+    sentry_dsn: str          
+    sentry_env: str
 
     class Config:
         env_file = ".env"

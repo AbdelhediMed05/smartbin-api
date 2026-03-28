@@ -52,10 +52,15 @@ def sanitize_filename(ext: str = "jpg") -> str:
 
 def strip_exif(pil_image: Image.Image) -> Image.Image:
     """
-    Remove EXIF by re-saving through a JPEG buffer — fast and memory efficient.
-    Avoids putdata() which copies every pixel into a Python list.
+    Remove EXIF by re-encoding through a JPEG buffer.
+    Uses quality=75 — same as predict_service save — so the intermediate
+    is not wasted at a higher quality than the final stored copy.
+    The buffer is explicitly closed after decode to release memory promptly.
     """
     buf = io.BytesIO()
-    pil_image.save(buf, format="JPEG", quality=95)
+    pil_image.save(buf, format="JPEG", quality=75)
     buf.seek(0)
-    return Image.open(buf).convert("RGB")
+    result = Image.open(buf).convert("RGB")
+    result.load()   # force decode now so buf can be closed immediately
+    buf.close()
+    return result

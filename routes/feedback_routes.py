@@ -1,29 +1,59 @@
+"""
+routes/feedback_routes.py — User feedback / correction submission.
+
+Rate limiting (OWASP A04):
+  POST /feedback/{id}  15/minute per USER+IP
+    Feedback is more frequent than predictions but still bounded.
+    User+IP combined key: prevents one account from gaming the points system
+    by submitting hundreds of corrections across rotating proxies.
+
+Input validation (OWASP A03):
+  - prediction_id UUID v4 validated via Path() regex.
+  - correct_class validated against the FEEDBACK_CLASS_NAMES allowlist.
+  - BBox coordinates bounded to [0, MAX_IMAGE_DIM] via BBoxCoord annotated type.
+  - extra="forbid" rejects unexpected fields (parameter pollution).
+"""
+
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from pydantic import BaseModel, field_validator
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from auth import get_current_user
 from domain.classes import FEEDBACK_CLASS_NAMES, UNKNOWN_CLASS
+from limiter import get_user_or_ip, limiter
 from services.feedback_service import submit_feedback as submit_feedback_service
+from validators import BBoxCoord, validated_uuid
 
 router = APIRouter(tags=["feedback"])
-limiter = Limiter(key_func=get_remote_address)
 
+
+# ── Request schemas ───────────────────────────────────────────────────────────
 
 class BBox(BaseModel):
-    x1: float
-    y1: float
-    x2: float
-    y2: float
+    """
+    Pixel bounding-box coordinates.
+    BBoxCoord = Annotated[float, Field(ge=0.0, le=4096.0)] — clamped at schema level.
+    Out-of-bounds coordinates would corrupt YOLO label files on HuggingFace.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    x1: BBoxCoord
+    y1: BBoxCoord
+    x2: BBoxCoord
+    y2: BBoxCoord
 
 
 class FeedbackRequest(BaseModel):
+    """
+    extra="forbid" prevents mass-assignment. correct_class is validated against
+    an explicit allowlist — unknown class names are rejected before DB insert.
+    """
+    model_config = ConfigDict(extra="forbid")
+
     correct_class: str = UNKNOWN_CLASS
-    was_correct: bool
-    bbox: Optional[BBox] = None
+    was_correct:   bool
+    bbox:          Optional[BBox] = None
 
     @field_validator("correct_class")
     @classmethod
@@ -34,15 +64,20 @@ class FeedbackRequest(BaseModel):
         return value
 
 
+# ── Endpoint ──────────────────────────────────────────────────────────────────
+
 @router.post("/feedback/{prediction_id}")
-@limiter.limit("20/minute")
+@limiter.limit("15/minute", key_func=get_user_or_ip)
 async def submit_feedback(
     request: Request,
-    prediction_id: str,
-    body: FeedbackRequest,
-    background_tasks: BackgroundTasks,
+    response: Response,
+    prediction_id: str = validated_uuid("prediction_id"),
+    body: FeedbackRequest = ...,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     current_user: dict = Depends(get_current_user),
 ):
+    request.state.user_id = current_user["user_id"]
+
     bbox_payload = None
     if body.bbox:
         bbox_payload = {
