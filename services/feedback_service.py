@@ -76,8 +76,10 @@ def submit_feedback(
             "was_correct": was_correct,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
-    except Exception as e:
-        raise HTTPException(500, f"Failed to save feedback: {e}")
+    except Exception as exc:
+        # OWASP A05: never forward raw DB exception strings to the client.
+        logger.error("Correction insert failed for prediction %s: %s", prediction_id, exc)
+        raise HTTPException(500, "Failed to save feedback. Please try again.")
 
     points_awarded = 1 if was_correct else 2
     try:
@@ -152,28 +154,36 @@ def _sync_feedback_artifacts(
 
     try:
         if hf_required:
-            img_bytes = prediction_repository.download_pending_image(pending_path)
+            # Guard: pending_path can be None if Supabase storage upload failed earlier.
+            # Attempting download_pending_image(None) would crash; skip HF upload instead.
+            if not pending_path:
+                logger.warning(
+                    "HF upload skipped for %s — pending_path is None (storage upload failed)",
+                    prediction_id,
+                )
+            else:
+                img_bytes = prediction_repository.download_pending_image(pending_path)
 
-            prediction_repository.upload_training_image(
-                image_path,
-                io.BytesIO(img_bytes),
-                settings.hf_dataset_repo,
-            )
+                prediction_repository.upload_training_image(
+                    image_path,
+                    io.BytesIO(img_bytes),
+                    settings.hf_dataset_repo,
+                )
 
-            cx = ((bbox["x1"] + bbox["x2"]) / 2) / img_w
-            cy = ((bbox["y1"] + bbox["y2"]) / 2) / img_h
-            bw = (bbox["x2"] - bbox["x1"]) / img_w
-            bh = (bbox["y2"] - bbox["y1"]) / img_h
-            yolo_line = f"{CLASS_IDS[final_class]} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}\n"
-            label_path = image_path.replace("images/", "labels/").replace(".jpg", ".txt")
+                cx = ((bbox["x1"] + bbox["x2"]) / 2) / img_w
+                cy = ((bbox["y1"] + bbox["y2"]) / 2) / img_h
+                bw = (bbox["x2"] - bbox["x1"]) / img_w
+                bh = (bbox["y2"] - bbox["y1"]) / img_h
+                yolo_line = f"{CLASS_IDS[final_class]} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}\n"
+                label_path = image_path.replace("images/", "labels/").replace(".jpg", ".txt")
 
-            prediction_repository.upload_training_image(
-                label_path,
-                yolo_line.encode(),
-                settings.hf_dataset_repo,
-            )
+                prediction_repository.upload_training_image(
+                    label_path,
+                    yolo_line.encode(),
+                    settings.hf_dataset_repo,
+                )
 
-            hf_uploaded = True
+                hf_uploaded = True
 
         update_payload = {
             "predicted_class": final_class,

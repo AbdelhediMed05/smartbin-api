@@ -1,9 +1,9 @@
-import gc
 import io
 import logging
 import uuid
 from datetime import datetime, timezone
 
+import sentry_sdk
 from fastapi import BackgroundTasks, HTTPException, UploadFile
 from PIL import Image
 
@@ -31,8 +31,18 @@ def predict_image(*, user_id: str, upload_file: UploadFile, conf: float, client_
 
     pil_img = strip_exif(pil_img)
 
+    # Tag this request's Sentry scope with image metadata (flat API, SDK v2+)
+    sentry_sdk.set_tag("model_version", MODEL_VERSION)
+    sentry_sdk.set_extra("image_size", f"{orig_w}x{orig_h}")
+    sentry_sdk.set_extra("infer_size", f"{infer_w}x{infer_h}")
+    sentry_sdk.set_extra("conf_threshold", conf)
+
     model = get_model()
-    detections, inference_ms = model.predict(pil_img, conf=conf, iou=settings.iou_threshold)
+    try:
+        detections, inference_ms = model.predict(pil_img, conf=conf, iou=settings.iou_threshold)
+    except Exception as exc:
+        sentry_sdk.set_extra("onnx_error", str(exc))
+        raise HTTPException(500, "Inference failed. Please try again.") from exc
 
     prediction_id = str(uuid.uuid4())
     detections_payload = [
@@ -57,6 +67,7 @@ def predict_image(*, user_id: str, upload_file: UploadFile, conf: float, client_
     primary_conf = round(detections[0].confidence, 4) if detections else None
 
     _store_pending_image(user_id, pil_img, prediction_id, detections, detections_payload, orig_w, orig_h)
+    del pil_img  # drop ref here — _store_pending_image already encoded and discarded its copy
 
     if detections:
         _insert_prediction_points(user_id, prediction_id)
@@ -154,21 +165,21 @@ def _store_pending_image(user_id: str, pil_img: Image.Image, prediction_id: str,
     image_path = f"images/{safe_name}"
     pending_path = f"pending/{safe_name}"
 
+    # Encode once into a BytesIO buffer; read() returns bytes for Supabase upload.
+    # No gc.collect() — CPython's generational GC handles this without stalling.
     buf = io.BytesIO()
     pil_img.save(buf, format="JPEG", quality=75)
-    buf.seek(0)
-    del pil_img
-    gc.collect()
+    img_bytes = buf.getvalue()   # zero-copy view of the buffer
+    buf.close()
 
     try:
-        prediction_repository.upload_pending_image(pending_path, buf.read(), "image/jpeg")
+        prediction_repository.upload_pending_image(pending_path, img_bytes, "image/jpeg")
     except Exception as e:
         logger.warning(f"Supabase storage upload failed: {e}")
+        sentry_sdk.capture_exception(e)
         pending_path = None
     finally:
-        buf.close()
-        del buf
-        gc.collect()
+        del img_bytes  # release the encoded bytes now that upload is done
 
     payload = {
         "id": prediction_id,
@@ -194,6 +205,7 @@ def _store_pending_image(user_id: str, pil_img: Image.Image, prediction_id: str,
     except Exception as e:
         if detections:
             logger.error(f"Supabase insert failed: {e}")
+            sentry_sdk.capture_exception(e)
         else:
             logger.warning(f"No-detection record insert failed: {e}")
 

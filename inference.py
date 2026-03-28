@@ -1,4 +1,3 @@
-import io
 import time
 import logging
 from dataclasses import dataclass
@@ -42,34 +41,13 @@ def letterbox(
     padded.paste(resized, (pad_x, pad_y))
 
     arr = np.array(padded, dtype=np.float32) / 255.0  # normalize [0,1]
-    arr = arr.transpose(2, 0, 1)[np.newaxis, ...]     # (1,3,640,640)
+    arr = arr.transpose(2, 0, 1)[np.newaxis, ...]     # (1, 3, target_size, target_size)
 
     scale_info = {
         "orig_w": orig_w, "orig_h": orig_h,
         "scale": scale, "pad_x": pad_x, "pad_y": pad_y,
     }
     return arr, scale_info
-
-
-def nms(boxes: np.ndarray, scores: np.ndarray, iou_thresh: float) -> List[int]:
-    """Non-Maximum Suppression. Returns kept indices."""
-    if len(boxes) == 0:
-        return []
-    x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
-    areas = (x2 - x1) * (y2 - y1)
-    order = scores.argsort()[::-1]
-    keep = []
-    while order.size > 0:
-        i = order[0]
-        keep.append(int(i))
-        xx1 = np.maximum(x1[i], x1[order[1:]])
-        yy1 = np.maximum(y1[i], y1[order[1:]])
-        xx2 = np.minimum(x2[i], x2[order[1:]])
-        yy2 = np.minimum(y2[i], y2[order[1:]])
-        inter = np.maximum(0, xx2 - xx1) * np.maximum(0, yy2 - yy1)
-        iou = inter / (areas[i] + areas[order[1:]] - inter + 1e-6)
-        order = order[np.where(iou <= iou_thresh)[0] + 1]
-    return keep
 
 
 class ONNXInference:

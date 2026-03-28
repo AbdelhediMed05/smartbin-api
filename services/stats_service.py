@@ -1,9 +1,12 @@
+import logging
 import time
 from typing import Optional
 
 from fastapi import HTTPException
 
 from repositories import stats_repository
+
+logger = logging.getLogger(__name__)
 
 _leaderboard_cache: Optional[dict] = None
 _leaderboard_ts: float = 0
@@ -64,8 +67,10 @@ def get_leaderboard() -> dict:
 
     try:
         data = stats_repository.get_leaderboard_rows(limit=20)
-    except Exception as e:
-        raise HTTPException(500, f"Failed to fetch leaderboard: {e}")
+    except Exception as exc:
+        # OWASP A05: never forward raw DB exception strings to the client
+        logger.error("Leaderboard fetch failed: %s", exc)
+        raise HTTPException(500, "Failed to fetch leaderboard. Please try again.")
 
     result = {"leaderboard": data, "cached_at": int(now)}
     _leaderboard_cache = result
