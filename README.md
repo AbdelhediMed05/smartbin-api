@@ -15,6 +15,20 @@
 
 ---
 
+## SmartBin Ecosystem
+
+This repository is one of three that make up the SmartBin system:
+
+| Repository | Role |
+|-----------|------|
+| **[smartbin-api](https://github.com/AbdelhediMed05/smartbin-api)** ← you are here | FastAPI backend — ONNX inference, auth, stats, Supabase |
+| **[smartbin-app](https://github.com/AbdelhediMed05/smartbin-app)** | Vanilla JS PWA — camera capture, detection overlay, feedback, leaderboard |
+| **[Smartbin-AI](https://github.com/AbdelhediMed05/Smartbin-AI)** | Model training pipeline — YOLO, dataset prep, ONNX export |
+
+The `best_combined.onnx` produced by the AI repo is the model file this API loads at startup.
+
+---
+
 ## Overview
 
 SmartBin API is the backend of the SmartBin system. It exposes a REST API consumed by the [SmartBin App](https://github.com/AbdelhediMed05/smartbin-app) that:
