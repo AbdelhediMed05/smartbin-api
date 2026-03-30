@@ -4,7 +4,6 @@
   <img src="https://img.shields.io/badge/FastAPI-0.111-009688?style=flat-square&logo=fastapi&logoColor=white" />
   <img src="https://img.shields.io/badge/ONNX%20Runtime-1.24-gray?style=flat-square" />
   <img src="https://img.shields.io/badge/deployed%20on-Render-46E3B7?style=flat-square&logo=render&logoColor=white" />
-  <img src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square" />
 </p>
 
 <h1 align="center">SmartBin — API</h1>
