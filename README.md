@@ -277,7 +277,7 @@ Rate limit: `10/min` per user+IP.
 
 ---
 
-## ML Model
+## Computer Vision Model
 
 The inference pipeline uses a **YOLO model exported to ONNX** (`best_combined.onnx`), loaded once at startup as a singleton via `inference.py`.
 
